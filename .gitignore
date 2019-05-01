@@ -1,0 +1,6 @@
+/.bundle
+/.env
+/.yardoc
+/doc
+/log/*.log
+/vendor/bundle
