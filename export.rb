@@ -8,8 +8,6 @@ require 'pp'
 class Exporter
   MAX_PER_PAGE = 100
 
-  # @param qiita_client [Qiita::Client]
-  # @param qiita_export_file_path [String]
   def initialize(qiita_client)
     @client = qiita_client
     @data_dir = ENV['DATA_DIR']
