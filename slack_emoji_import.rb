@@ -69,5 +69,4 @@ esa_client = Esa::Client.new(
 )
 
 importer = EmojiImporter.new(esa_client)
-# importer.import # default: dry_run
-importer.import(dry_run: false)
+importer.import # default: dry_run
