@@ -17,10 +17,10 @@ class EmojiImporter
   attr_accessor :client
 
   def import(dry_run: true, start_index: 0)
-    codes = Dir.glob('*', base: './images')
-    image_files = Dir.glob('./images/*')
+    codes = Dir.glob('*', base: './images').sort
+    image_files = Dir.glob('./images/*').sort
 
-    codes.sort.each_with_index do |code, index|
+    codes.each_with_index do |code, index|
       next if index < start_index
 
       image_file = image_files[index]
