@@ -1,6 +1,7 @@
 /.bundle
 /.env
 /.yardoc
+/images
 /data
 /doc
 /log/*.log
