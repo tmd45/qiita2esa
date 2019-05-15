@@ -52,6 +52,42 @@ class EmojiImporter
     end
   end
 
+  def delete_all(dry_run: true, start_index: 0)
+    codes = Dir.glob('*', base: './images').sort
+
+    codes.each_with_index do |code, index|
+      next if index < start_index
+
+      if dry_run
+        puts "DELETE ##{index}\t#{code}"
+        next
+      end
+
+      print "[#{Time.now}] index[#{index}] code: #{code} => "
+      response = client.delete_emoji(code)
+
+      case response.status
+      when 204
+        puts 'deleted!'
+      when 400, 404
+        puts "#{response.body['message']}"
+        next
+      when 500
+        # おそらく esa 標準の独自 Emoji を消そうとすると出る
+        puts "Can't delete esa.io Default Others Emoji."
+        next
+      when 429
+        retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
+        puts "rate limit exceeded: will retry after #{retry_after} seconds."
+        wait_for(retry_after)
+        redo
+      else
+        puts "failure with status: #{response.status}, #{response.body}"
+        exit 1
+      end
+    end
+  end
+
   private
 
   def wait_for(seconds)
@@ -70,3 +106,6 @@ esa_client = Esa::Client.new(
 
 importer = EmojiImporter.new(esa_client)
 importer.import # default: dry_run
+
+# 削除用
+# importer.delete_all # default: dry_run
