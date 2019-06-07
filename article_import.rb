@@ -44,7 +44,7 @@ class ArticleImporter
           body_md: 'under construction!'
         }
 
-        print "[#{Time.now}] index[#{idx}] #{article['name']} => "
+        print "[#{Time.now}] index[#{idx}] #{article['title']} => "
 
         if dry_run
           puts "dry_run..."
