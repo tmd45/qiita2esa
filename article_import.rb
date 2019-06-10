@@ -5,13 +5,14 @@ require 'json'
 require 'pp'
 
 class ArticleImporter
-  def initialize(esa_client, data_dir, cookie)
+  def initialize(esa_client, data_dir, qiita_access_token)
     @client = esa_client
     @data_files = Dir.glob('./data/' + data_dir + '/*.json').sort
     @results_file_path = File.path('./results/' + data_dir + '.tsv')
     @images_file_path = File.path('./results/' + data_dir + '_images.tsv')
     @members = File.open('./data/members.txt').readlines.inject(&:chomp)
-    @cookie = cookie
+    # 画像取得用
+    @qiita_access_token = qiita_access_token
   end
 
   attr_accessor :client,
@@ -19,7 +20,7 @@ class ArticleImporter
                 :results_file_path,
                 :images_file_path,
                 :members,
-                :cookie
+                :qiita_access_token
 
   # タイトルだけ投稿して記事 URL を決定する
   # Qiita:Team と esa の記事 URL 対応表を生成する
@@ -116,8 +117,9 @@ class ArticleImporter
             # 無条件にアップロード可能
             response = client.upload_attachment(image_path)
           else
-            # 画像アクセスにセッション（cookie）が必要
-            response = client.upload_attachment([image_path, cookie])
+            # 画像アクセスに認証情報が必要
+            headers = { 'Authorization' => "Bearer #{qiita_access_token}" }
+            response = client.upload_attachment([image_path, headers])
           end
 
           case response.status
@@ -163,8 +165,8 @@ esa_client = Esa::Client.new(
   current_team: ENV['ESA_CURRENT_TEAM']
 )
 
-qiita_cookie = ENV['QIITA_COOKIE']
+qiita_access_token = ENV['QIITA_ACCESS_TOKEN']
 
-importer = ArticleImporter.new(esa_client, '10th-anniversary', qiita_cookie)
+importer = ArticleImporter.new(esa_client, '10th-anniversary', qiita_access_token)
 importer.make_urls(dry_run: true)
 importer.upload_images(dry_run: true)
