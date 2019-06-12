@@ -9,6 +9,7 @@ require 'set'
 class ArticleImporter
   def initialize(esa_client, data_dir, qiita_access_token)
     @client = esa_client
+    @category = data_dir
     @data_files = Dir.glob('./data/' + data_dir + '/*.json').sort
     @results_file_path = File.path('./results/' + data_dir + '.tsv')
     @images_file_path = File.path('./results/' + data_dir + '_images.tsv')
@@ -18,6 +19,7 @@ class ArticleImporter
   end
 
   attr_accessor :client,
+                :category,
                 :data_files,
                 :results_file_path,
                 :images_file_path,
@@ -41,7 +43,7 @@ class ArticleImporter
         # NOTE: update 時に Owner のみ created_by の上書きが可能
         params = {
           name: article_title,
-          category: '(unsorted)',
+          category: "(unsorted)/#{category}",
           wip: true,
           message: '[skip notice] Import from Qiita:Team; Make URL',
           user: 'esa_bot',
@@ -199,17 +201,31 @@ class ArticleImporter
       # esa の記事 ID を取得
       esa_id = posts_table.find { |row| row[:qiita_url] == qiita_url }&.send(:[], :esa_id)
 
+      # 変換1
+      #   Qiita URL の変換対応表 Hash を作成 → 記事置換
+      keys = posts_table[:qiita_url]
+      vals = posts_table[:esa_url]
+      url_pairs = Hash[keys.zip(vals)]
+      url_exp = /https:\/\/feedforce.qiita.com\/[\w\-]+\/items\/\w+/
+      tmp1_body = origin_body.gsub(url_exp) { url_pairs[$&] || $& }
+
+      # 変換2
+      #   Qiita 画像 URL の変換対応表 Hash を作成 → 記事置換
+      keys = images_table[:qiita_image_url]
+      vals = images_table[:esa_image_url]
+      url_pairs = Hash[keys.zip(vals)]
+      images_exp = /https:\/\/feedforce.qiita.com\/files\/[\w\-]+\.[a-z]+|https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
+      tmp2_body = tmp1_body.gsub(images_exp) { url_pairs[$&] || $& }
+
+      # 変換3
+      #   記事中のユーザーメンションっぽいやつを全部小文字にする（雑）
+      replaced_body = tmp2_body.gsub(/\@[a-zA-Z0-9_-]+/) { $&.downcase }
+
       if dry_run
         puts "***** index: #{idx} *****"
         puts "Qiita URL: #{qiita_url}, esa ID: #{esa_id}"
         next
       end
-
-      # URL 作成済みの記事を上書き
-      # 1. 本文中の Qiita:Team URL を可能な限り esa URL に変換
-      # 2. 本文中の 画像 URL を esa の画像 URL に変換
-      # 3. 本文中の User ID を小文字（ScreenName）に変換
-      replace_body = origin_body
 
       # 上書きする記事情報を構築
       params = {
@@ -217,7 +233,7 @@ class ArticleImporter
           origin_created_at: #{article['created_at']}
           origin_qiita_url: #{qiita_url}
 
-          #{replace_body}
+          #{replaced_body}
         BODY_MD
         wip: false,
         message: '[skip notice] Import from Qiita:Team; Update content',
@@ -238,8 +254,8 @@ class ArticleImporter
         wait_for(retry_after)
         redo
       else
+        # 失敗しても中断はせずとりあえず結果を吐いて次のレコードへ
         puts "failure with status: #{response.status}"
-        exit 1
       end
 
       # 記事コメントを追加する
