@@ -12,7 +12,7 @@ class ArticleImporter
     @data_files = Dir.glob('./data/' + data_dir + '/*.json').sort
     @results_file_path = File.path('./results/' + data_dir + '.tsv')
     @images_file_path = File.path('./results/' + data_dir + '_images.tsv')
-    @members = File.open('./data/members.txt').readlines.inject(&:chomp)
+    @members = File.open('./data/members.txt').readlines.map(&:chomp)
     # 画像取得用
     @qiita_access_token = qiita_access_token
   end
@@ -52,6 +52,8 @@ class ArticleImporter
 
         if dry_run
           puts "dry_run..."
+          # DEBUG: 仮の値を吐き出しておく
+          result.puts "#{idx}\t#{article['id']}\t#{sprintf('%06d', idx)}\t#{article['url']}\tNEW_ESA_URL\tNEW_ESA_TITLE"
           next
         end
 
@@ -122,6 +124,8 @@ class ArticleImporter
 
         if dry_run
           puts "dry_run..."
+          # DEBUG: 仮の値を吐き出しておく
+          result.puts "#{idx}\t#{image_path}\tNEW_ESA_IMAGE_URL"
           next
         end
 
@@ -158,31 +162,28 @@ class ArticleImporter
     puts
   end
 
+  # 記事本文＋コメントをいろいろ変換しながら更新
   def update_post(dry_run: true)
     puts "####################### Begin #update_post"
 
-    qiita_ids = []
+    # 変換結果をキャッシュ
+    # 記事 URL
+    options = {
+      col_sep: "\t",
+      headers: [:idx, :qiita_id, :esa_id, :qiita_url, :esa_url, :esa_title]
+    }
+    # CSV::Table
+    posts_table = CSV.read(results_file_path, options)
 
-    unless dry_run
-      # 変換結果をキャッシュ
-      # 記事 URL
-      options = {
-        col_sep: "\t",
-        headers: [:idx, :qiita_id, :esa_id, :qiita_url, :esa_url, :esa_title]
-      }
-      # CSV::Table
-      posts_table = CSV.read(results_file_path, options)
+    # 画像 URL
+    options = {
+      col_sep: "\t",
+      headers: [:idx, :qiita_image_url, :esa_image_url]
+    }
+    images_table = CSV.read(images_file_path, options)
 
-      # 画像 URL
-      options = {
-        col_sep: "\t",
-        headers: [:idx, :qiita_image_url, :esa_image_url]
-      }
-      images_table = CSV.read(images_file_path, options)
-
-      # 実在メンバー一覧
-      members_set = Set(members).new # Set 利用で検索効率を上げるハズ
-    end
+    # 実在メンバー一覧
+    members_set = Set.new(members) # Set 利用で検索効率を上げるハズ
 
     # 対象ファイル読み込みループ
     data_files.each_with_index do |data_file, idx|
@@ -195,8 +196,12 @@ class ArticleImporter
       # 記事作成者
       screen_name = article['user']['id'].downcase
 
+      # esa の記事 ID を取得
+      esa_id = posts_table.find { |row| row[:qiita_url] == qiita_url }&.send(:[], :esa_id)
+
       if dry_run
-        puts qiita_url
+        puts "***** index: #{idx} *****"
+        puts "Qiita URL: #{qiita_url}, esa ID: #{esa_id}"
         next
       end
 
@@ -220,7 +225,7 @@ class ArticleImporter
       }
 
       print "[#{Time.now}] index[#{index}] #{article['name']} => "
-      response = client.update_post(params)
+      response = client.update_post(esa_id, params)
 
       case response.status
       when 201
@@ -236,6 +241,8 @@ class ArticleImporter
         puts "failure with status: #{response.status}"
         exit 1
       end
+
+      # 記事コメントを追加する
 
     end # of data_files.each_with_index
 
