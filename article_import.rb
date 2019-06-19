@@ -235,7 +235,8 @@ class ArticleImporter
         BODY_MD
         wip: false,
         message: '[skip notice] Import from Qiita:Team; Update content',
-        user: members_set.include?(screen_name) ? screen_name : 'esa_bot'
+        created_by: members_set.include?(screen_name) ? screen_name : 'esa_bot',
+        updated_by: members_set.include?(screen_name) ? screen_name : 'esa_bot'
       }
 
       if dry_run
@@ -252,7 +253,6 @@ class ArticleImporter
       case response.status
       when 200, 201
         esa_url = response.body['url']
-        record_urls(qiita_url, esa_url)
         puts "created: #{response.body['full_name']}\t#{esa_url}"
       when 429
         retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
@@ -266,7 +266,7 @@ class ArticleImporter
       end
 
       ## コメント情報
-      article[:comments].each do |comment|
+      article['comments'].each do |comment|
         commenter_name = comment['user']['id']&.downcase
         origin_cmt_body = comment['body']
 
@@ -291,7 +291,7 @@ class ArticleImporter
 
         # API Request: コメント投稿
         print "[#{Time.now}] index[#{idx}] #{article['name']}'s comment => "
-        response = client.create_comments(esa_id, params)
+        response = client.create_comment(esa_id, params)
 
         case response.status
         when 200, 201
