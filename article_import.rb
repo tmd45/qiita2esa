@@ -63,8 +63,8 @@ class ArticleImporter
         response = client.create_post(params)
 
         case response.status
-        when 201
-          puts "created: #{response.body['full_name']}\t#{esa_url}"
+        when 200, 201
+          puts "created: #{response.body['full_name']}\t#{response.body['url']}"
         when 429
           retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
           puts "rate limit exceeded: will retry after #{retry_after} seconds."
@@ -148,7 +148,7 @@ class ArticleImporter
         end
 
         case response.status
-        when 201
+        when 200, 201
           puts "created: #{response.body['attachment']['url']}"
         when 429
           retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
@@ -198,47 +198,38 @@ class ArticleImporter
     data_files.each_with_index do |data_file, idx|
       article = JSON.parse(File.read(data_file))
 
+      ## 記事情報
       # オリジナル記事 URL
       qiita_url = article['url']
       # オリジナル記事内容
       origin_body = article['body'] # Markdown
       # 記事作成者
       screen_name = article['user']['id'].downcase
+      # グループ名
+      group_name = article.dig('group', 'name') || 'none'
 
       # esa の記事 ID を取得
       esa_id = posts_table.find { |row| row[:qiita_url] == qiita_url }&.send(:[], :esa_id)
 
+      ## 記事本文のリプレイス
       # 変換1
-      #   Qiita URL の変換対応表 Hash を作成 → 記事置換
-      keys = posts_table[:qiita_url]
-      vals = posts_table[:esa_url]
-      url_pairs = Hash[keys.zip(vals)]
-      url_exp = /https:\/\/feedforce.qiita.com\/[\w\-]+\/items\/\w+/
-      tmp1_body = origin_body.gsub(url_exp) { url_pairs[$&] || $& }
-
+      tmp1_body = substitute_qiita_url(posts_table, origin_body)
       # 変換2
-      #   Qiita 画像 URL の変換対応表 Hash を作成 → 記事置換
-      keys = images_table[:qiita_image_url]
-      vals = images_table[:esa_image_url]
-      url_pairs = Hash[keys.zip(vals)]
-      images_exp = /https:\/\/feedforce.qiita.com\/files\/[\w\-]+\.[a-z]+|https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
-      tmp2_body = tmp1_body.gsub(images_exp) { url_pairs[$&] || $& }
-
+      tmp2_body = substitute_image_url(images_table, tmp1_body)
       # 変換3
-      #   記事中のユーザーメンションっぽいやつを全部小文字にする（雑）
-      replaced_body = tmp2_body.gsub(/\@[a-zA-Z0-9_-]+/) { $&.downcase }
-
-      if dry_run
-        puts "***** index: #{idx} *****"
-        puts "Qiita URL: #{qiita_url}, esa ID: #{esa_id}"
-        next
-      end
+      replaced_body = substitute_user_mention(tmp2_body)
 
       # 上書きする記事情報を構築
       params = {
         body_md: <<~BODY_MD,
-          origin_created_at: #{article['created_at']}
-          origin_qiita_url: #{qiita_url}
+          Original URL: #{qiita_url}
+          Created by: #{article['user']['id']}
+          Original created at: #{article['created_at']}
+          Original last updated at: #{article['updated_at']}
+          Original group: #{group_name}
+          Reactions: #{':star:' * article['reactions_count']} (#{article['reactions_count']})
+
+          ---
 
           #{replaced_body}
         BODY_MD
@@ -247,11 +238,19 @@ class ArticleImporter
         user: members_set.include?(screen_name) ? screen_name : 'esa_bot'
       }
 
-      print "[#{Time.now}] index[#{index}] #{article['name']} => "
+      if dry_run
+        puts "***** index: #{idx} *****"
+        puts "Qiita URL: #{qiita_url}, esa ID: #{esa_id}"
+        pp params
+        next
+      end
+
+      # API Request: 本文更新
+      print "[#{Time.now}] index[#{idx}] #{article['name']} => "
       response = client.update_post(esa_id, params)
 
       case response.status
-      when 201
+      when 200, 201
         esa_url = response.body['url']
         record_urls(qiita_url, esa_url)
         puts "created: #{response.body['full_name']}\t#{esa_url}"
@@ -266,12 +265,89 @@ class ArticleImporter
         next
       end
 
-      # 記事コメントを追加する
-      comments = article[:comments]
+      ## コメント情報
+      article[:comments].each do |comment|
+        commenter_name = comment['user']['id']&.downcase
+        origin_cmt_body = comment['body']
+
+        ## コメント本文のリプレイス
+        # 変換1
+        tmp1_cmt_body = substitute_qiita_url(posts_table, origin_cmt_body)
+        # 変換2
+        tmp2_cmt_body = substitute_image_url(images_table, tmp1_cmt_body)
+        # 変換3
+        replaced_comment_body = substitute_user_mention(tmp2_cmt_body)
+
+        # コメント情報を構築
+        params = {
+          body_md: <<~BODY_MD,
+            #{replaced_comment_body}
+
+            <div style="color: #ccc">Original created at: #{comment['created_at']}</div>
+            <div style="color: #ccc">Created by: #{comment['user']['id']}</div>
+          BODY_MD
+          user: members_set.include?(commenter_name) ? commenter_name : 'esa_bot'
+        }
+
+        # API Request: コメント投稿
+        print "[#{Time.now}] index[#{idx}] #{article['name']}'s comment => "
+        response = client.create_comments(esa_id, params)
+
+        case response.status
+        when 200, 201
+          puts "created comment: #{response.body['url']}"
+        when 429
+          retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
+          puts "rate limit exceeded: will retry after #{retry_after} seconds."
+          wait_for(retry_after)
+          redo
+        else
+          # 失敗しても中断はせずとりあえず結果を吐いて次のレコードへ
+          puts "failure with status: #{response.status}"
+        end
+      end # of comments.each
 
     end # of data_files.each_with_index
 
     puts
+  end
+
+  private
+
+  # Qiita URL の変換対応表 Hash を作成 → 記事置換
+  #
+  # @param posts_table [CSV::Table]
+  # @param body [String] origin body
+  # @return [String] replaced body
+  def substitute_qiita_url(posts_table, body)
+    keys ||= posts_table[:qiita_url]
+    vals ||= posts_table[:esa_url]
+    url_pairs ||= Hash[keys.zip(vals)]
+    url_exp ||= /https:\/\/feedforce.qiita.com\/[\w\-]+\/items\/\w+/
+    # 置換して返す
+    body.gsub(url_exp) { url_pairs[$&] || $& }
+  end
+
+  # Qiita 画像 URL の変換対応表 Hash を作成 → 記事置換
+  #
+  # @param images_table [CSV::Table]
+  # @param body [String] origin body
+  # @return [String] replaced body
+  def substitute_image_url(images_table, body)
+      keys ||= images_table[:qiita_image_url]
+      vals ||= images_table[:esa_image_url]
+      url_pairs ||= Hash[keys.zip(vals)]
+      images_exp ||= /https:\/\/feedforce.qiita.com\/files\/[\w\-]+\.[a-z]+|https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
+      # 置換して返す
+      body.gsub(images_exp) { url_pairs[$&] || $& }
+  end
+
+  # 記事中のユーザーメンションっぽいやつを全部小文字にする（雑）
+  #
+  # @param body [String] origin body
+  # @return [String] replaced body
+  def substitute_user_mention(body)
+    body.gsub(/\@[a-zA-Z0-9_-]+/) { $&.downcase }
   end
 end
 
