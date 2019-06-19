@@ -95,28 +95,35 @@ class ArticleImporter
     puts "####################### Begin #upload_images"
 
     # 重複のない元画像 URL 一覧を作成する
-    image_paths_all = []
-    image_paths = []
+    tmp_images_file_path = File.path('./results/tmp_images.txt')
 
-    # 対象記事ファイル読み込みループ
-    data_files.each_with_index do |data_file, idx|
-      article = JSON.parse(File.read(data_file))
+    File.open(tmp_images_file_path, 'w') do |tmp|
+      # 対象記事ファイル読み込みループ
+      data_files.each_with_index do |data_file, idx|
+        article = JSON.parse(File.read(data_file))
 
-      # 旧画像 URL の処理
-      exp1 = /https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
-      image_paths = image_paths + article['body'].scan(exp1)
+        # 旧画像 URL の処理
+        exp1 = /https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
+        article['body'].scan(exp1).each { |path| tmp.puts path }
 
-      # 新画像 URL の処理（アクセスにログインセッションが必要）
-      exp2 = /https:\/\/feedforce.qiita.com\/files\/[\w\-]+\.[a-z]+/
-      image_paths = image_paths + article['body'].scan(exp2)
+        # 新画像 URL の処理（アクセスにログインセッションが必要）
+        exp2 = /https:\/\/feedforce.qiita.com\/files\/[\w\-]+\.[a-z]+/
+        article['body'].scan(exp2).each { |path| tmp.puts path }
 
-      image_paths.uniq!
-      image_paths.sort!
-      image_paths_all = image_paths_all + image_paths
-    end # of data_files.each_with_index
+        # コメントからも抽出
+        article['comments'].each do |cmt|
+          cmt['body'].scan(exp1).each { |path| tmp.puts path }
+          cmt['body'].scan(exp2).each { |path| tmp.puts path }
+        end
+      end # of data_files.each_with_index
+    end
 
     # 重複した URL は除外
+    image_paths_all = File.open(tmp_images_file_path).readlines.map(&:chomp)
     image_paths_all.uniq!
+
+    puts "Finished listing image paths, unique count: #{image_paths_all.count}"
+    puts
 
     # 結果記録ファイル Open
     File.open(images_file_path, 'w') do |result|
@@ -254,11 +261,13 @@ class ArticleImporter
         wait_for(retry_after)
         redo
       else
-        # 失敗しても中断はせずとりあえず結果を吐いて次のレコードへ
+        # 失敗したらコメントの追加はスキップする
         puts "failure with status: #{response.status}"
+        next
       end
 
       # 記事コメントを追加する
+      comments = article[:comments]
 
     end # of data_files.each_with_index
 
