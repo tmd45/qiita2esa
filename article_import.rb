@@ -7,7 +7,7 @@ require 'csv'
 require 'set'
 
 class ArticleImporter
-  def initialize(esa_client, data_dir, qiita_access_token)
+  def initialize(esa_client, data_dir, qiita_access_token, qiita_team_name)
     @client = esa_client
     @category = data_dir
     @data_files = Dir.glob('./data/' + data_dir + '/*.json').sort
@@ -16,6 +16,7 @@ class ArticleImporter
     @members = File.open('./data/members.txt').readlines.map(&:chomp)
     # 画像取得用
     @qiita_access_token = qiita_access_token
+    @qiita_team_name = qiita_team_name
   end
 
   attr_accessor :client,
@@ -24,7 +25,8 @@ class ArticleImporter
                 :results_file_path,
                 :images_file_path,
                 :members,
-                :qiita_access_token
+                :qiita_access_token,
+                :qiita_team_name
 
   # タイトルだけ投稿して記事 URL を決定する
   # Qiita:Team と esa の記事 URL 対応表を生成する
@@ -107,7 +109,7 @@ class ArticleImporter
         article['body'].scan(exp1).each { |path| tmp.puts path }
 
         # 新画像 URL の処理（アクセスにログインセッションが必要）
-        exp2 = /https:\/\/feedforce.qiita.com\/files\/[\w\-]+\.[a-z]+/
+        exp2 = /https:\/\/#{qiita_team_name}.qiita.com\/files\/[\w\-]+\.[a-z]+/
         article['body'].scan(exp2).each { |path| tmp.puts path }
 
         # コメントからも抽出
@@ -213,9 +215,9 @@ class ArticleImporter
 
       ## 記事本文のリプレイス
       # 変換1
-      tmp1_body = substitute_qiita_url(posts_table, origin_body)
+      tmp1_body = substitute_qiita_url(posts_table, qiita_team_name, origin_body)
       # 変換2
-      tmp2_body = substitute_image_url(images_table, tmp1_body)
+      tmp2_body = substitute_image_url(images_table, qiita_team_name, tmp1_body)
       # 変換3
       replaced_body = substitute_user_mention(tmp2_body)
 
@@ -272,9 +274,9 @@ class ArticleImporter
 
         ## コメント本文のリプレイス
         # 変換1
-        tmp1_cmt_body = substitute_qiita_url(posts_table, origin_cmt_body)
+        tmp1_cmt_body = substitute_qiita_url(posts_table, qiita_team_name, origin_cmt_body)
         # 変換2
-        tmp2_cmt_body = substitute_image_url(images_table, tmp1_cmt_body)
+        tmp2_cmt_body = substitute_image_url(images_table, qiita_team_name, tmp1_cmt_body)
         # 変換3
         replaced_comment_body = substitute_user_mention(tmp2_cmt_body)
 
@@ -319,11 +321,11 @@ class ArticleImporter
   # @param posts_table [CSV::Table]
   # @param body [String] origin body
   # @return [String] replaced body
-  def substitute_qiita_url(posts_table, body)
+  def substitute_qiita_url(posts_table, team_name, body)
     keys ||= posts_table[:qiita_url]
     vals ||= posts_table[:esa_url]
     url_pairs ||= Hash[keys.zip(vals)]
-    url_exp ||= /https:\/\/feedforce.qiita.com\/[\w\-]+\/items\/\w+/
+    url_exp ||= /https:\/\/#{team_name}.qiita.com\/[\w\-]+\/items\/\w+/
     # 置換して返す
     body.gsub(url_exp) { url_pairs[$&] || $& }
   end
@@ -333,11 +335,11 @@ class ArticleImporter
   # @param images_table [CSV::Table]
   # @param body [String] origin body
   # @return [String] replaced body
-  def substitute_image_url(images_table, body)
+  def substitute_image_url(images_table, team_name, body)
       keys ||= images_table[:qiita_image_url]
       vals ||= images_table[:esa_image_url]
       url_pairs ||= Hash[keys.zip(vals)]
-      images_exp ||= /https:\/\/feedforce.qiita.com\/files\/[\w\-]+\.[a-z]+|https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
+      images_exp ||= /https:\/\/#{team_name}.qiita.com\/files\/[\w\-]+\.[a-z]+|https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
       # 置換して返す
       body.gsub(images_exp) { url_pairs[$&] || $& }
   end
@@ -359,8 +361,9 @@ esa_client = Esa::Client.new(
 )
 
 qiita_access_token = ENV['QIITA_ACCESS_TOKEN']
+qiita_team_name = ENV['QIITA_CURRENT_TEAM']
 
-importer = ArticleImporter.new(esa_client, ENV['GROUP_NAME'], qiita_access_token)
+importer = ArticleImporter.new(esa_client, ENV['GROUP_NAME'], qiita_access_token, qiita_team_name)
 importer.make_urls(dry_run: true)
 importer.upload_images(dry_run: true)
 importer.update_post(dry_run: true)
