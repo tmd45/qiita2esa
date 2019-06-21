@@ -13,7 +13,7 @@ class ArticleImporter
     @data_files = Dir.glob('./data/' + data_dir + '/*.json').sort
     @results_file_path = File.path('./results/' + data_dir + '.tsv')
     @images_file_path = File.path('./results/' + data_dir + '_images.tsv')
-    @members = File.open('./data/members.txt').readlines.map(&:chomp)
+    @members = File.open('./data/' + data_dir + '_members.txt').readlines.map(&:chomp)
     # 画像取得用
     @qiita_access_token = qiita_access_token
     @qiita_team_name = qiita_team_name
