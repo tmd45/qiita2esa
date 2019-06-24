@@ -32,11 +32,14 @@ class ArticleImporter
   # Qiita:Team と esa の記事 URL 対応表を生成する
   def make_urls(dry_run: true)
     puts "####################### Begin #make_urls"
+    puts 'dry_run!' if dry_run
 
     # 結果記録ファイル Open
     File.open(results_file_path, 'w') do |result|
       # 対象ファイル読み込みループ
       data_files.each_with_index do |data_file, idx|
+        puts "Begin create article count: #{idx}" if idx.modulo(5_000).zero?
+
         article = JSON.parse(File.read(data_file))
         article_title = article['title'].gsub(/\//, '&#47;')
 
@@ -52,10 +55,10 @@ class ArticleImporter
           body_md: 'under construction!'
         }
 
-        print "[#{Time.now}] index[#{idx}] #{article_title} => "
+        # print "[#{Time.now}] index[#{idx}] #{article_title} => "
 
         if dry_run
-          puts "dry_run..."
+          # puts "dry_run..."
           # DEBUG: 仮の値を吐き出しておく
           result.puts "#{idx}\t#{article['id']}\t#{sprintf('%06d', idx)}\t#{article['url']}\tNEW_ESA_URL\tNEW_ESA_TITLE"
           next
@@ -66,15 +69,15 @@ class ArticleImporter
 
         case response.status
         when 200, 201
-          puts "created: #{response.body['full_name']}\t#{response.body['url']}"
+          # puts "created: #{response.body['full_name']}\t#{response.body['url']}"
         when 429
           retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
-          puts "rate limit exceeded: will retry after #{retry_after} seconds."
+          puts "#{idx}: rate limit exceeded: will retry after #{retry_after} seconds."
           wait_for(retry_after)
           redo
         else
           # 失敗しても中断はせずとりあえず結果を吐いて次のレコードへ
-          puts "failure with status: #{response.status}"
+          puts "#{idx}: failure with status: #{response.status}"
         end
 
         qiita_id = article['id']
@@ -95,6 +98,7 @@ class ArticleImporter
   # NOTE: 添付されているのは画像だけじゃないが、面倒なので画像ってことにしておく
   def upload_images(dry_run: true)
     puts "####################### Begin #upload_images"
+    puts 'dry_run!' if dry_run
 
     # 重複のない元画像 URL 一覧を作成する
     tmp_images_file_path = File.path('./results/tmp_images.txt')
@@ -131,10 +135,11 @@ class ArticleImporter
     File.open(images_file_path, 'w') do |result|
       # 画像を取得して esa にアップロードする
       image_paths_all.each_with_index do |image_path, idx|
-        print "[#{Time.now}] index[#{idx}] #{image_path} => "
+        puts "Begin import count: #{idx}" if idx.modulo(5_000).zero?
+        # print "[#{Time.now}] index[#{idx}] #{image_path} => "
 
         if dry_run
-          puts "dry_run..."
+          # puts "dry_run..."
           # DEBUG: 仮の値を吐き出しておく
           result.puts "#{idx}\t#{image_path}\tNEW_ESA_IMAGE_URL"
           next
@@ -151,15 +156,15 @@ class ArticleImporter
 
         case response.status
         when 200, 201
-          puts "created: #{response.body['attachment']['url']}"
+          # puts "created: #{response.body['attachment']['url']}"
         when 429
           retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
-          puts "rate limit exceeded: will retry after #{retry_after} seconds."
+          puts "#{idx}: rate limit exceeded: will retry after #{retry_after} seconds."
           wait_for(retry_after)
           redo
         else
           # 失敗しても中断はせずとりあえず結果を吐いて次のレコードへ
-          puts "failure with status: #{response.status}"
+          puts "#{idx}: failure with status: #{response.status}"
         end
 
         qiita_image_url = image_path
@@ -176,6 +181,7 @@ class ArticleImporter
   # 記事本文＋コメントをいろいろ変換しながら更新
   def update_post(dry_run: true)
     puts "####################### Begin #update_post"
+    puts 'dry_run!' if dry_run
 
     # 変換結果をキャッシュ
     # 記事 URL
@@ -242,28 +248,28 @@ class ArticleImporter
       }
 
       if dry_run
-        puts "***** index: #{idx} *****"
-        puts "Qiita URL: #{qiita_url}, esa ID: #{esa_id}"
-        pp params
+        # puts "***** index: #{idx} *****"
+        # puts "Qiita URL: #{qiita_url}, esa ID: #{esa_id}"
+        # pp params
         next
       end
 
       # API Request: 本文更新
-      print "[#{Time.now}] index[#{idx}] #{article['name']} => "
+      # print "[#{Time.now}] index[#{idx}] #{article['name']} => "
       response = client.update_post(esa_id, params)
 
       case response.status
       when 200, 201
-        esa_url = response.body['url']
-        puts "created: #{response.body['full_name']}\t#{esa_url}"
+        # esa_url = response.body['url']
+        # puts "created: #{response.body['full_name']}\t#{esa_url}"
       when 429
         retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
-        puts "rate limit exceeded: will retry after #{retry_after} seconds."
+        puts "#{idx}: rate limit exceeded: will retry after #{retry_after} seconds."
         wait_for(retry_after)
         redo
       else
         # 失敗したらコメントの追加はスキップする
-        puts "failure with status: #{response.status}"
+        puts "#{idx}: failure with status: #{response.status}"
         next
       end
 
@@ -292,25 +298,23 @@ class ArticleImporter
         }
 
         # API Request: コメント投稿
-        print "[#{Time.now}] index[#{idx}] #{article['name']}'s comment => "
+        # print "[#{Time.now}] index[#{idx}] #{article['name']}'s comment => "
         response = client.create_comment(esa_id, params)
 
         case response.status
         when 200, 201
-          puts "created comment: #{response.body['url']}"
+          # puts "created comment: #{response.body['url']}"
         when 429
           retry_after = (response.headers['Retry-After'] || 20 * 60).to_i
-          puts "rate limit exceeded: will retry after #{retry_after} seconds."
+          puts "#{idx}: rate limit exceeded: will retry after #{retry_after} seconds."
           wait_for(retry_after)
           redo
         else
           # 失敗しても中断はせずとりあえず結果を吐いて次のレコードへ
-          puts "failure with status: #{response.status}"
+          puts "#{idx}: failure with status: #{response.status}"
         end
       end # of comments.each
-
     end # of data_files.each_with_index
-
     puts
   end
 
@@ -350,6 +354,17 @@ class ArticleImporter
   # @return [String] replaced body
   def substitute_user_mention(body)
     body.gsub(/\@[a-zA-Z0-9_-]+/) { $&.downcase }
+  end
+
+  def wait_for(seconds)
+    return if wait_sec <= 0
+
+    (seconds / 10).times do
+      print '.'
+      sleep 10
+    end
+    sleep wait_sec % 10
+    puts
   end
 end
 
