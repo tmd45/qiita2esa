@@ -109,11 +109,11 @@ class ArticleImporter
         article = JSON.parse(File.read(data_file))
 
         # 旧画像 URL の処理
-        exp1 = /https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
+        exp1 = /https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z0-9]{2,5}/
         article['body'].scan(exp1).each { |path| tmp.puts path }
 
         # 新画像 URL の処理（アクセスにログインセッションが必要）
-        exp2 = /https:\/\/#{qiita_team_name}.qiita.com\/files\/[\w\-]+\.[a-z]+/
+        exp2 = /https:\/\/#{qiita_team_name}.qiita.com\/files\/[\w\-]+\.[a-z0-9]{2,5}/
         article['body'].scan(exp2).each { |path| tmp.puts path }
 
         # コメントからも抽出
@@ -204,6 +204,8 @@ class ArticleImporter
 
     # 対象ファイル読み込みループ
     data_files.each_with_index do |data_file, idx|
+      puts "Begin import count: #{idx}" if idx.modulo(5_000).zero?
+
       article = JSON.parse(File.read(data_file))
 
       ## 記事情報
