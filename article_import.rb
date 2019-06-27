@@ -38,6 +38,8 @@ class ArticleImporter
     File.open(results_file_path, 'w') do |result|
       # 対象ファイル読み込みループ
       data_files.each_with_index do |data_file, idx|
+        # 途中から実行する場合
+        # next if idx <= 123
         puts "Begin create article count: #{idx}" if idx.modulo(5_000).zero?
 
         article = JSON.parse(File.read(data_file))
@@ -135,6 +137,8 @@ class ArticleImporter
     File.open(images_file_path, 'w') do |result|
       # 画像を取得して esa にアップロードする
       image_paths_all.each_with_index do |image_path, idx|
+        # 途中から実行する場合
+        # next if idx <= 123
         puts "Begin import count: #{idx}" if idx.modulo(5_000).zero?
         # print "[#{Time.now}] index[#{idx}] #{image_path} => "
 
@@ -187,6 +191,7 @@ class ArticleImporter
     # 記事 URL
     options = {
       col_sep: "\t",
+      quote_char: '\\',
       headers: [:idx, :qiita_id, :esa_id, :qiita_url, :esa_url, :esa_title]
     }
     # CSV::Table
@@ -195,6 +200,7 @@ class ArticleImporter
     # 画像 URL
     options = {
       col_sep: "\t",
+      quote_char: '\\',
       headers: [:idx, :qiita_image_url, :esa_image_url]
     }
     images_table = CSV.read(images_file_path, options)
@@ -204,6 +210,8 @@ class ArticleImporter
 
     # 対象ファイル読み込みループ
     data_files.each_with_index do |data_file, idx|
+      # 途中から実行する場合
+      # next if idx <= 123
       puts "Begin import count: #{idx}" if idx.modulo(5_000).zero?
 
       article = JSON.parse(File.read(data_file))
@@ -345,7 +353,7 @@ class ArticleImporter
       keys ||= images_table[:qiita_image_url]
       vals ||= images_table[:esa_image_url]
       url_pairs ||= Hash[keys.zip(vals)]
-      images_exp ||= /https:\/\/#{team_name}.qiita.com\/files\/[\w\-]+\.[a-z]+|https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z]+/
+      images_exp ||= /https:\/\/#{team_name}.qiita.com\/files\/[\w\-]+\.[a-z0-9]{2,5}|https:\/\/qiita-image-store.s3.amazonaws.com\/[0-9]+\/[0-9]+\/[\w\-]+\.[a-z0-9]{2,5}/
       # 置換して返す
       body.gsub(images_exp) { url_pairs[$&] || $& }
   end
